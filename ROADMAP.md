@@ -55,8 +55,10 @@ What Phase 1 did not cover:
   tested.
 - **No CI gate for libpcap 1.5.3–1.8.1.** Their differences are documented
   rather than checked in CI.
-- **CI has not run on GitHub yet.** Its first run happens with the push of
-  this work.
+- **First CI run on GitHub: 6 of 8 jobs passed.** Both `libpcap-versions`
+  jobs failed because the container's tcpdump wrote root-owned 0600 files that
+  the runner user could not read. Fixed by running it with the runner's uid
+  (reproduced and verified as uid 1001 locally).
 
 New items Phase 1 suggested (added below):
 - An optional `--libpcap 1.5` compatibility mode for filters that will run on

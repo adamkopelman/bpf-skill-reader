@@ -71,9 +71,13 @@ jobs:
             ${{ matrix.image }} sleep infinity
           docker exec pcap dnf -q -y install tcpdump
           docker exec pcap tcpdump --version
+      # tcpdump runs as the runner's uid so the files it writes stay readable
+      # here (as root it would create them root-owned with mode 0600).
       - name: Recipes against this libpcap
-        run: python tools/check_docs.py --tcpdump "docker exec pcap tcpdump" --tmpdir "$RUNNER_TEMP/xcheck"
+        run: |
+          python tools/check_docs.py --tcpdump "docker exec -u $(id -u):$(id -g) pcap tcpdump" \
+            --tmpdir "$RUNNER_TEMP/xcheck"
       - name: Real-capture corpus against this libpcap
         run: |
           python tools/corpus.py xcheck tests/corpus samples/demo.pcap \
-            --tcpdump "docker exec pcap tcpdump" --tmpdir "$RUNNER_TEMP/xcheck"
+            --tcpdump "docker exec -u $(id -u):$(id -g) pcap tcpdump" --tmpdir "$RUNNER_TEMP/xcheck"
