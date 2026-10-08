@@ -14,6 +14,13 @@ air-gapped hosts.
   `bpfkit/decode.py` or `bpfkit/bpfgen.py`, run `python3 tools/selftest.py`.
   After touching `knowledge/bpf/`, run `python3 tools/check_docs.py`. Both must
   pass. They use tcpdump for a live cross-check when it is installed.
+  `selftest` also runs the real-capture corpus (`tests/corpus/`) and the unit
+  tests (`tests/`). If tcpdump is available, `python3 tools/corpus.py xcheck
+  <dir>` compares the engine on any captures.
+- **Don't change files in `tests/corpus/`** without re-running
+  `tools/corpus.py record` with tcpdump; `expected.json` pins their sha256.
+- Version-specific libpcap behaviour is measured in
+  `knowledge/bpf/08-libpcap-versions.md`. bpfkit follows libpcap 1.9+.
 - **Any new feature term in `bpfgen.packet_features`** must mean exactly what
   the engine computes for that BPF text. `suggest` re-verifies, but a mismatch
   makes the learner choose badly.

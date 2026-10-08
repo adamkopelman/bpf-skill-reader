@@ -7,9 +7,11 @@ Each filter must be accepted by bpfkit. If tcpdump is installed it must also
 be accepted by tcpdump, and both must select the same packets in the demo
 capture.
 """
+import argparse
 import glob
 import os
 import re
+import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,10 +31,15 @@ def filters_in(path):
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--tcpdump", help="tcpdump command to compare with, e.g. 'docker exec box tcpdump' "
+                                      "(default: tcpdump from PATH, if any)")
+    ap.add_argument("--tmpdir", help="temp dir visible to that command")
+    args = ap.parse_args()
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     demo = os.path.join(root, "samples", "demo.pcap")
     pkts = list(read_packets(demo))
-    td = find_tcpdump()
+    td = shlex.split(args.tcpdump) if args.tcpdump else ([find_tcpdump()] if find_tcpdump() else None)
     bad = total = 0
     for path in sorted(glob.glob(os.path.join(root, "knowledge", "bpf", "*.md"))):
         for expr in filters_in(path):
@@ -46,7 +53,7 @@ def main():
                 continue
             if td:
                 try:
-                    theirs = sorted(tcpdump_matching_keys(demo, expr))
+                    theirs = sorted(tcpdump_matching_keys(demo, expr, td, args.tmpdir))
                 except RuntimeError as e:
                     bad += 1
                     print("TCPDUMP REJECTS %s: %s\n    %s" % (os.path.basename(path), expr, e))

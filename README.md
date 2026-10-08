@@ -66,12 +66,18 @@ over raw packet bytes. It copies libpcap's quirks: equal `and`/`or`
 precedence, qualifier carry-over, `vlan` offset shifting, IPv4-only
 `tcp[]`/`udp[]`, and out-of-bounds rejection.
 
-- During development, 182 filter/link-type cases and the 115 recipes in
-  `knowledge/bpf/03-recipes.md` were compared packet-for-packet with tcpdump
-  4.99.4 / libpcap 1.10.4 and all of them agree.
-- The two known differences are documented in `knowledge/bpf/04-gotchas.md`:
-  libpcap's optimiser sometimes skips an out-of-range load, and libpcap's
-  unary minus is broken.
+- It was compared packet-for-packet with tcpdump 4.99.4 / libpcap 1.10.4 on
+  the **whole tcpdump test suite**: 399 real captures, 8,723 packets and 37,978
+  filter comparisons, with no unexplained differences.
+- 29 of those captures ship in `tests/corpus/` with tcpdump's answers, so
+  `selftest` re-checks 2,681 cases offline.
+- The 119 recipes in `knowledge/bpf/` were also checked against libpcap 1.5.3
+  (RHEL 7), 1.7.4, 1.8.1, 1.9.1 and 1.10.0. Version differences are listed in
+  `knowledge/bpf/08-libpcap-versions.md`.
+- The intentional differences are documented in
+  `knowledge/bpf/04-gotchas.md`: libpcap's optimiser sometimes skips an
+  out-of-range load or a run-time divide-by-zero, and libpcap's unary minus is
+  broken.
 
 Supported link types are Ethernet, raw IP, Linux SLL/SLL2 and BSD
 NULL/LOOP. Unsupported constructs, such as Wi-Fi, `mpls` or `protochain`,
@@ -87,8 +93,10 @@ skill evals.
 ## Development
 
 ```sh
-python3 tools/selftest.py        # engine + formats + bpfgen (uses tcpdump too when installed)
+python3 tools/selftest.py        # formats, engine, real-capture corpus, unit tests, bpfgen (+ tcpdump when installed)
 python3 tools/check_docs.py      # every recipe filter compiles (and matches tcpdump when installed)
+python3 -m unittest discover -s tests          # unit tests only
+python3 tools/corpus.py xcheck DIR [--tcpdump "docker exec box tcpdump"]   # compare with any libpcap build
 python3 -m bpfkit.synth samples/demo.pcap   # regenerate the demo capture
 ```
 

@@ -48,7 +48,8 @@ tcp[tcpflags] & (tcp-syn|tcp-fin) = (tcp-syn|tcp-fin) # SYN+FIN (always maliciou
 tcp[tcpflags] = tcp-fin                               # FIN scan (FIN alone, no ACK)
 tcp[14:2] = 0 and tcp[tcpflags] & tcp-rst = 0         # zero window (receiver stalled)
 tcp and (((ip[2:2] - ((ip[0] & 0x0f) << 2)) - ((tcp[12] & 0xf0) >> 2)) != 0)   # TCP with payload (IPv4)
-tcp[tcpflags] & (tcp-ece|tcp-cwr) != 0                # ECN signalling
+tcp[tcpflags] & (tcp-ece|tcp-cwr) != 0                # ECN signalling (libpcap >= 1.9)
+tcp[13] & 0xc0 != 0                                   # ECN signalling, any libpcap (RHEL 7 too)
 ```
 
 ## ICMP / ICMPv6
@@ -105,7 +106,7 @@ vlan 20 and host 10.20.0.5                            # host inside VLAN 20
 vlan and vlan 200                                     # QinQ, inner VLAN 200
 ip or (vlan and ip)                                   # IPv4 tagged or untagged (order matters!)
 tcp port 80 or (vlan and tcp port 80)                 # same idea for a port
-ether[12:2] = 0x8100 and ether[14:2] & 0x0fff = 20    # VLAN 20 without shifting later terms
+ether[12:2] = 0x8100 and ether[14:2] & 0x0fff = 20    # VLAN 20 without shifting (FILES ONLY: never matches live on Linux receive)
 ```
 
 ## Application protocols (IPv4 payload offsets)

@@ -63,17 +63,21 @@ def tcpdump_compile(expr, linktype_name="EN10MB"):
     return r.stdout
 
 
-def tcpdump_matching_keys(path, expr):
-    """Run `tcpdump -r path -w tmp expr`; return list of (ts_sec, ts_usec, caplen)
-    for packets tcpdump kept, or raise RuntimeError."""
+def tcpdump_matching_keys(path, expr, tcpdump=None, tmpdir=None):
+    """Run `tcpdump -r path -w tmp expr`; return list of ((ts_sec, ts_usec), caplen)
+    for packets tcpdump kept, or raise RuntimeError. `tcpdump` may be a command
+    list such as ["docker", "exec", "box", "tcpdump"]; tmpdir must then be
+    visible to that command at the same path."""
     from .pcapio import read_packets
-    td = find_tcpdump()
-    if not td:
-        raise RuntimeError("tcpdump not found in PATH")
-    fd, tmp = tempfile.mkstemp(suffix=".pcap")
+    if tcpdump is None:
+        td = find_tcpdump()
+        if not td:
+            raise RuntimeError("tcpdump not found in PATH")
+        tcpdump = [td]
+    fd, tmp = tempfile.mkstemp(suffix=".pcap", dir=tmpdir)
     os.close(fd)
     try:
-        r = subprocess.run([td, "-r", path, "-w", tmp, expr],
+        r = subprocess.run(list(tcpdump) + ["-r", path, "-w", tmp, expr],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            universal_newlines=True, timeout=600)
         if r.returncode != 0:

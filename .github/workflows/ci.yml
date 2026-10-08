@@ -1,0 +1,79 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }} + tcpdump cross-check
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install tcpdump (live cross-checks) and pyflakes
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tcpdump
+          tcpdump --version
+          python -m pip install --quiet pyflakes
+      - name: Self-test (formats, engine, real-capture corpus, unit tests, tcpdump cross-check)
+        run: python tools/selftest.py
+      - name: Knowledge-base recipes compile and match tcpdump
+        run: python tools/check_docs.py
+      - name: Lint
+        run: python -m pyflakes bpfkit tools tests
+
+  old-python:
+    # The interpreters air-gapped hosts tend to have (RHEL 7/8 ship 3.6).
+    # Run in docker from the runner: actions/checkout cannot run inside these images.
+    name: Python ${{ matrix.python }} (no tcpdump)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.5", "3.6", "3.7", "3.8"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Self-test and recipes
+        run: |
+          docker run --rm -v "$PWD":/repo -w /repo python:${{ matrix.python }}-slim \
+            sh -c "python3 --version && python3 tools/selftest.py && python3 tools/check_docs.py"
+
+  libpcap-versions:
+    # Distribution libpcap builds that must agree with bpfkit on every corpus check.
+    # Older ones (CentOS 7's 1.5.3, Ubuntu 18.04's 1.8.1) differ in documented ways:
+    # knowledge/bpf/08-libpcap-versions.md.
+    name: libpcap from ${{ matrix.image }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["rockylinux:8", "rockylinux:9"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Start ${{ matrix.image }} with its own tcpdump
+        run: |
+          mkdir -p "$RUNNER_TEMP/xcheck"
+          docker run -d --name pcap -v "$PWD":"$PWD" -v "$RUNNER_TEMP/xcheck":"$RUNNER_TEMP/xcheck" \
+            ${{ matrix.image }} sleep infinity
+          docker exec pcap dnf -q -y install tcpdump
+          docker exec pcap tcpdump --version
+      - name: Recipes against this libpcap
+        run: python tools/check_docs.py --tcpdump "docker exec pcap tcpdump" --tmpdir "$RUNNER_TEMP/xcheck"
+      - name: Real-capture corpus against this libpcap
+        run: |
+          python tools/corpus.py xcheck tests/corpus samples/demo.pcap \
+            --tcpdump "docker exec pcap tcpdump" --tmpdir "$RUNNER_TEMP/xcheck"

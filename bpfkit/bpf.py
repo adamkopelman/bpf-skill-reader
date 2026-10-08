@@ -62,20 +62,25 @@ class _NoProto(Exception):
 ETH_IP, ETH_IP6, ETH_ARP, ETH_RARP = 0x0800, 0x86DD, 0x0806, 0x8035
 VLAN_TPIDS = (0x8100, 0x88A8, 0x9100)
 
+# Exactly the names libpcap accepts after 'ether proto \' (verified on 1.5.3 to
+# 1.10.4). Anything else, such as \vlan, \lldp or \mpls, is an error there too.
 ETHER_PROTO_NAMES = {
     "ip": ETH_IP, "ip6": ETH_IP6, "arp": ETH_ARP, "rarp": ETH_RARP,
-    "atalk": 0x809B, "aarp": 0x80F3, "decnet": 0x6003, "lat": 0x6004,
-    "sca": 0x6007, "moprc": 0x6002, "mopdl": 0x6001, "ipx": 0x8137,
-    "vlan": 0x8100, "mpls": 0x8847, "pppoed": 0x8863, "pppoes": 0x8864,
-    "loopback": 0x9000, "lldp": 0x88CC, "eapol": 0x888E,
+    "decnet": 0x6003, "lat": 0x6004, "sca": 0x6007, "moprc": 0x6002,
+    "mopdl": 0x6001, "loopback": 0x9000,
 }
 
+# Names libpcap resolves after 'ip proto \' via /etc/protocols on a standard
+# Linux host. igrp, ip6, icmp6 and carp are NOT among them (tcpdump rejects
+# them), so they are left out to keep filters portable.
 IP_PROTO_NAMES = {
-    "icmp": 1, "igmp": 2, "ggp": 3, "ipip": 4, "tcp": 6, "egp": 8, "igrp": 9,
-    "udp": 17, "ip6": 41, "rsvp": 46, "gre": 47, "esp": 50, "ah": 51,
-    "icmp6": 58, "eigrp": 88, "ospf": 89, "pim": 103, "vrrp": 112, "carp": 112,
-    "l2tp": 115, "sctp": 132,
+    "icmp": 1, "igmp": 2, "ggp": 3, "ipip": 4, "tcp": 6, "egp": 8,
+    "udp": 17, "rsvp": 46, "gre": 47, "esp": 50, "ah": 51,
+    "eigrp": 88, "ospf": 89, "pim": 103, "vrrp": 112, "l2tp": 115, "sctp": 132,
 }
+# libpcap accepts these after 'ether proto \' but compiles them with LLC/SNAP
+# logic that bpfkit does not implement.
+LLC_PROTO_NAMES = ("iso", "stp", "ipx", "netbeui", "atalk", "aarp")
 
 # Protocol abbreviations usable as primitives: name -> (ipv4 proto, ipv6 proto)
 TRANSPORT_ABBREV = {
@@ -1024,6 +1029,10 @@ class Parser(object):
         elif t.kind == "id":
             name = t.val.lstrip("\\")
             table = ETHER_PROTO_NAMES if proto in ("ether", "link") else IP_PROTO_NAMES
+            if proto in ("ether", "link") and name in LLC_PROTO_NAMES:
+                raise FilterUnsupported(
+                    "'ether proto \\%s' uses LLC/SNAP matching that the built-in engine does "
+                    "not implement; use tcpdump" % name)
             if name not in table:
                 raise FilterSyntaxError("unknown protocol name %r" % name)
             v = table[name]

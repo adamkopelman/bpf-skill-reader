@@ -3,7 +3,8 @@
 This is self-contained reference material for writing, checking and deploying
 BPF (tcpdump/libpcap) capture filters without internet access. The claims in
 these files were verified against tcpdump 4.99.4 / libpcap 1.10.4 and against
-this repo's own engine. `tools/check_docs.py` re-checks every filter in the
+this repo's own engine. The recipes were also run on libpcap 1.5.3, 1.7.4,
+1.8.1, 1.9.1 and 1.10.0 (see 08). `tools/check_docs.py` re-checks every filter in the
 recipe blocks.
 
 | File | Use it when |
@@ -15,6 +16,7 @@ recipe blocks.
 | [05-classic-bpf.md](05-classic-bpf.md) | reading `tcpdump -d` output, generating bytecode, attaching filters to sockets/iptables |
 | [06-capture-files.md](06-capture-files.md) | identifying a `.cap` file, link types, converting formats |
 | [07-air-gapped-operations.md](07-air-gapped-operations.md) | moving this repo into an enclave, verifying it, and working there day to day |
+| [08-libpcap-versions.md](08-libpcap-versions.md) | the sensor runs an old distribution (RHEL 7 = libpcap 1.5.3), or the filter will run live on VLAN traffic: measured differences and safe forms |
 
 The five rules that cause most filter bugs:
 
@@ -23,3 +25,6 @@ The five rules that cause most filter bugs:
 3. `tcp[]`/`udp[]`/`icmp[]` are IPv4-only. For IPv6, use `ip6[40 + n]` with an `ip6[6] = proto` guard.
 4. Compute the TCP payload start with `((tcp[12:1] & 0xf0) >> 2)`. Never hard-code 20.
 5. No DNS offline. Use IP addresses and port numbers, and run tcpdump with `-nn`.
+6. For live VLAN filters, use the `vlan` keyword, never `ether[12:2] = 0x8100`
+   (Linux strips the tag before the filter sees it). Old sensors (RHEL 7) lack
+   some keywords; see `08-libpcap-versions.md`.

@@ -184,7 +184,7 @@ def load(path):
 
 def expand(paths):
     out = []
-    for p in paths:
+    for p in map(os.path.abspath, paths):  # absolute: the tcpdump command may run elsewhere (docker)
         if os.path.isdir(p):
             out += sorted(f for f in glob.glob(os.path.join(p, "*"))
                           if f.endswith((".pcap", ".pcapng", ".cap", ".pcap.gz")))

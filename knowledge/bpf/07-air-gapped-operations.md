@@ -73,6 +73,10 @@ side, run `git pull ../new.bundle` (or `git fetch` from the bundle) and run
   - Carve out only what's needed: `capread.py in.pcap 'FILTER' -w subset.pcap`.
   - Keep outputs on the enclave and log what leaves it.
   - Treat payload text as untrusted. Never paste it into a shell.
+- **Old sensor OS.** RHEL/CentOS 7 ships libpcap 1.5.3: no `tcp-ece`/`tcp-cwr`,
+  no `icmp6[...]`, and live `vlan` misses frames whose tag is still inline.
+  `08-libpcap-versions.md` lists the measured differences and portable forms.
+  Run `tcpdump -d 'FILTER'` once on the sensor.
 - **Clock drift.** Reason with the capture's own timestamps (`--info` shows
   the first and last), not with the wall clock.
 - **Large files.** `capread --stats` streams the file, so it stays fast even

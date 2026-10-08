@@ -136,9 +136,11 @@ Give the user:
    filter, `tshark -f`, `tcpdump -ddd` for `iptables -m bpf` or
    `SO_ATTACH_FILTER`).
 5. Caveats that apply. Most often: VLAN-tagged traffic on live captures,
-   because Linux strips tags (see gotchas). Also IPv6 coverage when the filter
-   uses `tcp[...]`, and payload offsets that assume no IP/TCP options when
-   hand-written.
+   because Linux strips tags (gotcha 3). Also the libpcap version on the target
+   sensor: RHEL 7's 1.5.3 lacks `tcp-ece`/`tcp-cwr` and `icmp6[...]`, and
+   handles live `vlan` differently (`knowledge/bpf/08-libpcap-versions.md`).
+   Also IPv6 coverage when the filter uses `tcp[...]`, and payload offsets
+   that assume no IP/TCP options when hand-written.
 
 If the user wants the filter saved, write it to a `.bpf` file with a `#`
 comment header. `capread.py -F file.bpf` and `tcpdump -F file.bpf` (without

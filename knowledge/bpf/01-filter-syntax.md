@@ -50,9 +50,9 @@ ip6 net 2001:db8::/32
 | `icmp`, `igmp`, `vrrp` | IPv4 protocol 1 / 2 / 112 |
 | `icmp6` | IPv6 next header 58 |
 | `pim`, `ah`, `esp` | IPv4 or IPv6 protocol 103 / 51 / 50 |
-| `ip proto N`, `ip6 proto N`, `proto N` | protocol number, or a name with a backslash: `ip proto \tcp` |
-| `ether proto N` | EtherType, e.g. `ether proto 0x88cc` (LLDP), `ether proto \arp` |
-| `vlan [id]` | 802.1Q/802.1ad tag present (TPID 0x8100, 0x88a8, 0x9100), optionally with VLAN id. **Shifts later offsets by 4: see gotchas.** |
+| `ip proto N`, `ip6 proto N`, `proto N` | protocol number, or a name from `/etc/protocols` with a backslash: `ip proto \tcp`, `\udp`, `\gre`, `\esp`, `\ospf`. `\icmp6`, `\ip6`, `\igrp` and `\carp` are *not* accepted; use numbers |
+| `ether proto N` | EtherType, e.g. `ether proto 0x88cc` (LLDP). Accepted names: `\ip \ip6 \arp \rarp \decnet \lat \sca \moprc \mopdl \loopback`, plus LLC-based `\iso \stp \ipx \netbeui \atalk \aarp` (tcpdump only). `\vlan`, `\lldp`, `\mpls` and `\eapol` do not exist; use numbers |
+| `vlan [id]` | 802.1Q/802.1ad tag present (TPID 0x8100, 0x88a8 since libpcap 1.8, 0x9100), optionally with VLAN id. **Shifts later offsets by 4: see gotchas.** |
 | `mpls [label]`, `pppoes [sess]` | similar encapsulation keywords (tcpdump only) |
 | `broadcast` / `ether broadcast` | destination MAC ff:ff:ff:ff:ff:ff |
 | `multicast` / `ether multicast` | destination MAC group bit set (includes broadcast) |
@@ -106,7 +106,7 @@ arithmetic expression that may itself contain loads.
   from the start of the transport header. **They work on IPv4 packets only, and
   only on the first fragment.** The IPv4 header length is computed for you.
 - `icmp6[...]` counts from IPv6 byte 40, and only when the next header is 58
-  (needs a recent libpcap).
+  (libpcap 1.9 or newer).
 - A relation that indexes a protocol is **false** for packets of other
   protocols. So `ip[9] = 6` is false for ARP, and `not ip[9] = 6` is true for
   ARP.
@@ -134,10 +134,10 @@ Named constants:
 | Name | Value |
 |---|---|
 | `tcpflags` | 13 |
-| `tcp-fin` `tcp-syn` `tcp-rst` `tcp-push` `tcp-ack` `tcp-urg` `tcp-ece` `tcp-cwr` | 0x01 0x02 0x04 0x08 0x10 0x20 0x40 0x80 |
+| `tcp-fin` `tcp-syn` `tcp-rst` `tcp-push` `tcp-ack` `tcp-urg` `tcp-ece` `tcp-cwr` | 0x01 0x02 0x04 0x08 0x10 0x20 0x40 0x80 (`tcp-ece`/`tcp-cwr`: libpcap 1.9+) |
 | `icmptype` / `icmpcode` | 0 / 1 |
 | `icmp-echoreply` `icmp-unreach` `icmp-sourcequench` `icmp-redirect` `icmp-echo` `icmp-routeradvert` `icmp-routersolicit` `icmp-timxceed` `icmp-paramprob` `icmp-tstamp` `icmp-tstampreply` `icmp-ireq` `icmp-ireqreply` `icmp-maskreq` `icmp-maskreply` | 0 3 4 5 8 9 10 11 12 13 14 15 16 17 18 |
-| `icmp6type` / `icmp6code` | 0 / 1 |
+| `icmp6type` / `icmp6code` (libpcap 1.9+) | 0 / 1 |
 | `icmp6-echo` `icmp6-echoreply` `icmp6-routersolicit` `icmp6-routeradvert` `icmp6-neighborsolicit` `icmp6-neighboradvert` `icmp6-redirect` | 128 129 133 134 135 136 137 |
 
 ```

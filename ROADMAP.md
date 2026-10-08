@@ -4,62 +4,65 @@ This is an honest list of what works today, what is weak, and what to do
 next, in priority order. Each item names the files involved and how to know
 it is done.
 
-## Where things stand (v1.0.0)
+## Where things stand (after Phase 1)
 
 | Area | State |
 |---|---|
 | Capture reading | pcap (µs/ns/modified), pcapng, snoop, gzip. Ethernet, raw IP, SLL/SLL2, NULL/LOOP |
-| Filter engine | libpcap-compatible interpreter. 182 test cases + 115 doc recipes agree with tcpdump 4.99.4 / libpcap 1.10.4 |
-| Pattern mining | `bpfgen profile/suggest/test`. Greedy rule learner with tcpdump-verified output |
-| Knowledge base | 7 offline reference files. Every recipe filter is machine-checked |
-| Verification | `tools/selftest.py` (works without tcpdump) and `tools/check_docs.py` |
-| Python | static analysis says 3.5+; actually run on 3.8, 3.11, 3.12 and 3.13 |
+| Filter engine | libpcap-compatible interpreter. Agrees with tcpdump 4.99.4 / libpcap 1.10.4 on the whole tcpdump test suite (399 real captures, 37,978 comparisons) and with libpcap 1.9.1 and 1.10.0 on the committed corpus |
+| Pattern mining | `bpfgen profile/suggest/test`. Greedy rule learner with tcpdump-verified output. 400 mangled captures fuzzed, 0 crashes |
+| Knowledge base | 8 offline reference files. 119 recipe filters machine-checked, also on libpcap 1.5.3 to 1.10.0 |
+| Verification | `tools/selftest.py`: synthetic results, 2,681 real-capture checks and 40 unit tests, all offline. Plus `tools/check_docs.py`, `tools/corpus.py` and CI |
+| Python | run on 3.5, 3.6, 3.7, 3.8, 3.11, 3.12 and 3.13 |
 
 ---
 
-## Phase 1: correctness and trust (do first)
+## Phase 1: correctness and trust (DONE)
 
-1. **Test on real captures, not only synthetic ones.**
-   - **Problem.** `bpfkit/expected.py` comes from one synthetic 69-packet
-     capture. Real traffic has TCP/IP options, IPv6 extension headers,
-     truncated packets (snaplen), odd link types and malformed frames.
-   - **Plan.** Build a small corpus under `samples/` from public, licensable
-     captures and a few OT-protocol captures. Add a script that records
-     tcpdump results for `filters × captures` into `expected.py`.
-   - **Done when.** `selftest` covers at least 5 real captures, with 0
-     mismatches.
-2. **Test the oldest Pythons we claim.**
-   - **Problem.** We claim 3.5+ but have only run 3.8 and newer. Air-gapped
-     RHEL 7/8 hosts ship 3.6.
-   - **Done when.** `selftest` passes on 3.6 and 3.7, either in a container or
-     on a real enclave host.
-3. **Test against older libpcap.**
-   - **Problem.** The knowledge base and `expected.py` were verified on
-     libpcap 1.10.4 only. RHEL 7 ships 1.5.3, and the `icmp6[...]` support
-     and VLAN code paths differ.
-   - **Plan.** Re-run `check_docs.py` and `selftest` with older tcpdump
-     builds, and record which recipes need a newer libpcap.
-4. **Verify live-capture VLAN behaviour.**
-   - **Problem.** `knowledge/bpf/04-gotchas.md` §3 describes Linux
-     tag-stripping from libpcap source knowledge. It was not checked on a
-     live tagged interface.
-   - **Done when.** It has been checked on a live tagged interface, and the
-     doc gives exact libpcap/kernel versions.
-5. **Make hostname resolution opt-in.**
-   - **Problem.** `bpf._resolve_host` calls `getaddrinfo`. On an air-gapped
-     host that can hang until the resolver times out, or leak a DNS query to
-     an internal resolver.
-   - **Plan.** Off by default (error: "use an IP address"), with an
-     `--allow-dns` flag.
-6. **Add CI.**
-   - **Plan.** A GitHub Actions workflow that installs tcpdump, then runs
-     `selftest`, `check_docs` and `pyflakes` on Python 3.6 (container),
-     3.8 and 3.13.
-7. **Add unit tests for the parser.**
-   - **Problem.** The current tests are end-to-end only.
-   - **Plan.** Add `unittest` cases (stdlib) for the tokenizer edge cases:
-     MAC vs IPv6 vs `tcp[13:1]`, `portrange`, octal, `len-14`, `\tcp`
-     escapes. Add round-trip cases for error messages.
+| # | Item | Outcome | Evidence |
+|---|---|---|---|
+| 1 | Real captures | `tests/corpus/`: 29 captures from tcpdump 4.99.4's own test suite (BSD, licence included), 2,681 recorded tcpdump answers, checked by `selftest` offline | `tools/corpus.py check`. Whole suite: `tools/corpus.py xcheck` → 0 unexplained differences |
+| 2 | Old Pythons | `selftest`, `check_docs`, every CLI and the unit tests pass on 3.5.10, 3.6.15, 3.7.17 and 3.8.20 | docker `python:3.x-slim`; CI job `old-python` |
+| 3 | Old libpcap | Measured on 1.5.3 (CentOS 7), 1.7.4, 1.8.1, 1.9.1 (Rocky 8) and 1.10.0 (Rocky 9). 1.9.1 and newer agree fully. Older versions lack `tcp-ece/cwr`, `icmp6[]` and 0x88a8 in `vlan` | `knowledge/bpf/08-libpcap-versions.md`; CI job `libpcap-versions` |
+| 4 | Live VLAN | Measured with a veth pair on Linux 6.18, both directions, five libpcap versions. Found that `ether[12:2] = 0x8100` never matches live on receive, and that live `vlan` on libpcap 1.8 and older misses inline tags. Docs corrected | `tests/live/live_vlan.py`; 08 § Live capture |
+| 5 | DNS opt-in | Host names are errors unless `--allow-dns` (`compile_filter(..., allow_dns=True)`) | `tests/test_bpf.py` |
+| 6 | CI | `.github/workflows/ci.yml` has three jobs. `test`: 3.11/3.13 + tcpdump + pyflakes. `old-python`: 3.5–3.8. `libpcap-versions`: Rocky 8/9 | every job was simulated locally before pushing |
+| 7 | Unit tests | 40 `unittest` cases: tokenizer, parser structure, syntax errors, evaluation semantics, link types, I/O edge cases, decoder fuzzing, bpfgen on mangled captures | `python3 -m unittest discover -s tests` |
+
+Bugs Phase 1 found and fixed:
+- `ether proto 0x8100` was treated like `vlan`. libpcap compiles a plain
+  EtherType compare.
+- The pcap link-type field kept FCS flag bits. Link types 12/14 were not read
+  as raw IP.
+- libpcap rejects a divisor it can fold to zero at compile time; bpfkit
+  silently matched nothing.
+- `ether proto` and `ip proto` names accepted names that libpcap rejects
+  (`\lldp`, `\vlan`, `\icmp6`, ...).
+- Decoder crashes on truncated or malformed packets: half-set address
+  fields, and `l3`/`l4` set before their fields existed. `profile` and
+  `suggest` crashed on those packets too.
+- Docs:
+  - `ether[12:2] = 0x8100` was recommended as a VLAN test, but it fails live.
+  - "Newer libpcap" claims were vague; they now name exact versions.
+  - Gotcha 13 contradicted measured `ip broadcast` behaviour.
+
+What Phase 1 did not cover:
+- **No real OT-protocol captures** (Modbus/DNP3/S7) in the committed corpus.
+  No clearly licensed ones were found, so Modbus is covered only
+  synthetically (`samples/demo.pcap`).
+- **No physical NIC or SPAN port tested.** The live VLAN results come from
+  veth on one kernel; physical NICs with VLAN offload and SPAN ports were not
+  tested.
+- **No CI gate for libpcap 1.5.3–1.8.1.** Their differences are documented
+  rather than checked in CI.
+- **CI has not run on GitHub yet.** Its first run happens with the push of
+  this work.
+
+New items Phase 1 suggested (added below):
+- An optional `--libpcap 1.5` compatibility mode for filters that will run on
+  old sensors.
+- A warning in `bpfgen` when a generated filter uses a feature that needs a
+  newer libpcap.
 
 ## Phase 2: things that should be better
 
@@ -83,7 +86,17 @@ it is done.
   options: compile the AST to Python source once per filter, or add a
   `--prefilter` fast path for plain host/port filters.
 
+- **libpcap version targeting.** Add `--libpcap 1.5|1.8|1.9` to `capread`
+  and `bpfgen`, emulating the measured differences in
+  `knowledge/bpf/08-libpcap-versions.md`: `vlan` without 0x88a8, no
+  `tcp-ece/cwr`, no `icmp6[]`. Filters for a RHEL 7 sensor can then be
+  tested here.
+
 ### Pattern mining (`bpfkit/bpfgen.py`)
+
+- **Target-version warnings.** Warn when a suggested filter uses something an
+  older sensor libpcap lacks, or a VLAN form that behaves differently live
+  (see 08).
 
 - **Greedy learner.** Sequential covering with FOIL gain can miss shorter
   filters. Add a small beam search (width 3–5), and a final step that tries

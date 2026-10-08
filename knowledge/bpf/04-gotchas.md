@@ -36,17 +36,23 @@ vlan or ip                ->  5 packets  ("ip" here looks 4 bytes too deep)
 Rules:
 - Put the untagged alternatives first and the `vlan ...` part last.
 - Use exactly one `vlan` per tag level. `vlan and vlan` means QinQ.
-- To test a VLAN id without shifting anything, use the absolute form
-  `ether[12:2] = 0x8100 and ether[14:2] & 0x0fff = 20`.
+- To test a VLAN id without shifting anything **in a file**, use the absolute
+  form `ether[12:2] = 0x8100 and ether[14:2] & 0x0fff = 20`. It never matches
+  live on a Linux receive path (see below).
 - `ether[...]` and `ether host` are never shifted.
 
-**Live capture on Linux is different.** The kernel usually strips the VLAN tag
-into metadata before the filter runs, and recent libpcap compiles `vlan` into
-a check of that metadata. On a live interface, a plain `ip` filter may
-therefore match tagged traffic that the same filter misses when you read the
-saved file. A `-i any` (Linux cooked) capture has no tags at all. When VLANs
-matter, test the filter both live and offline. `ip or (vlan and ip)` works in
-both cases.
+**Live capture on Linux is different (measured; full table in
+`08-libpcap-versions.md`).** On the receive path the kernel strips the tag
+before the filter runs, and keeps it as metadata.
+
+- Live `ip`, `host` and `port` filters therefore also match tagged frames,
+  which the same filter misses in the saved file.
+- `ether[12:2] = 0x8100` never matches live.
+- The `vlan` keyword reads the metadata, so it behaves the same live and
+  offline. On libpcap 1.8 and older (RHEL 7, Ubuntu 18.04) live `vlan` reads
+  *only* the metadata and misses frames whose tag is still inline.
+- `ip or (vlan and ip)` is correct offline and live on libpcap 1.9 and newer.
+- A `-i any` (Linux cooked) capture has no tags at all.
 
 ## 4. `tcp[...]`, `udp[...]`, `icmp[...]` are IPv4-only
 
@@ -78,6 +84,12 @@ have accepted it:
 tcp[100] = 1 or ip        -> 17 packets with tcpdump -O (unoptimised) and with bpfkit
                           -> 58 packets with default tcpdump (the optimiser happens to test "ip" first)
 ```
+
+A divisor that is zero only at run time behaves the same way:
+`ip[0] / (ip[1] & 1) = 1 or ip` matches nothing in bpfkit and with
+`tcpdump -O`, but optimised tcpdump matches every IP packet. A divisor
+libpcap can fold to zero (`x / 0`, `x / (y & 0)`, `x % (y - y)`) is a
+compile-time error in both.
 
 Don't rely on either behaviour:
 - Put payload-indexing terms last.
@@ -151,9 +163,17 @@ file with BPF, use `tcpdump -r` or `tools/capread.py`.
 little-endian, such as DNP3 addresses or EtherNet/IP commands, must be
 compared byte-swapped: DNP3 destination 1024 (0x0400) is `... + 4:2] = 0x0004`.
 
-## 17. Older libpcap versions
+## 17. Older libpcap versions (RHEL 7 = 1.5.3)
 
-`icmp6[...]`, `icmp6type`, `ip6 protochain` and some keywords only exist in
-newer libpcap releases. For portable filters, prefer `ip6[6] = 58 and
-ip6[40] = N` and plain byte offsets. Check with `tcpdump -d 'FILTER'` on the
-target machine.
+These were measured on 1.5.3, 1.7.4, 1.8.1, 1.9.1 and 1.10.x; see
+`08-libpcap-versions.md`.
+
+- **Need libpcap 1.9 or newer:** `tcp-ece`/`tcp-cwr`, and `icmp6[...]` with
+  `icmp6type` and the `icmp6-*` names. The portable forms are
+  `tcp[13] & 0x40`/`0x80` and `ip6[6] = 58 and ip6[40] = N`.
+- **`vlan` and 802.1ad:** before 1.8, `vlan` does not recognise the 802.1ad
+  outer TPID 0x88a8.
+- Offline, libpcap 1.9.1 and newer agree with bpfkit on every one of 2,827
+  corpus comparisons.
+- When a filter must run on an old sensor, check it there once with
+  `tcpdump -d 'FILTER'`.
