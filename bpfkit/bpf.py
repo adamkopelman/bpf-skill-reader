@@ -566,7 +566,17 @@ def _ip4_net(text, mask_text=None):
     return a, m
 
 
-def _resolve_host(name):
+# Name resolution is OFF by default: on an air-gapped host getaddrinfo() can
+# hang until the resolver times out, or send the name to an internal DNS
+# server. Callers opt in with compile_filter(..., allow_dns=True) or --allow-dns.
+ALLOW_DNS = False
+
+
+def _resolve_host(name, allow_dns):
+    if not allow_dns:
+        raise FilterSyntaxError(
+            "%r looks like a host name, and name resolution is disabled (air-gapped "
+            "default). Use the IP address, or pass --allow-dns to resolve it." % name)
     try:
         infos = socket.getaddrinfo(name, None)
     except (socket.gaierror, UnicodeError):
@@ -733,8 +743,9 @@ class _Quals(object):
 
 
 class Parser(object):
-    def __init__(self, text):
+    def __init__(self, text, allow_dns=False):
         self.text = text
+        self.allow_dns = allow_dns
         self.toks = tokenize(text)
         self.i = 0
         self.vlan_depth = 0
@@ -1060,7 +1071,7 @@ class Parser(object):
             a = struct.unpack(">I", ipaddress.IPv4Address(text).packed)[0]
             return Fn(desc, _host4(proto, dirq, a, 0xFFFFFFFF, d))
         # hostname
-        addrs = _resolve_host(text)
+        addrs = _resolve_host(text, self.allow_dns)
         node = None
         for ad in addrs:
             if ":" in ad:
@@ -1086,10 +1097,12 @@ class Parser(object):
 # --------------------------------------------------------------------------
 
 class BPFFilter(object):
-    def __init__(self, text):
+    def __init__(self, text, allow_dns=None):
         self.text = text
+        if allow_dns is None:
+            allow_dns = ALLOW_DNS
         try:
-            self.root = Parser(text).parse()
+            self.root = Parser(text, allow_dns).parse()
         except ValueError as e:  # bad address / number caught by ipaddress/int()
             raise FilterSyntaxError(str(e))
 
@@ -1105,6 +1118,9 @@ class BPFFilter(object):
         return str(self.root) if self.root is not None else "(match everything)"
 
 
-def compile_filter(text):
-    """Parse a tcpdump-style filter. Raises FilterSyntaxError/FilterUnsupported."""
-    return BPFFilter(text or "")
+def compile_filter(text, allow_dns=None):
+    """Parse a tcpdump-style filter. Raises FilterSyntaxError/FilterUnsupported.
+
+    Host names are only resolved when allow_dns is True (default: the module
+    setting ALLOW_DNS, which is False)."""
+    return BPFFilter(text or "", allow_dns)

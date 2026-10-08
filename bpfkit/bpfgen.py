@@ -36,6 +36,7 @@ import math
 import sys
 
 from . import decode as dec
+from . import bpf as bpf_module
 from .bpf import compile_filter, FilterSyntaxError, FilterUnsupported, SERVICES, NAMED_CONSTANTS
 from .pcapio import read_packets, CaptureFormatError
 from .util import (parse_index_spec, popcount, bitset_from_indices, bits_to_positions,
@@ -138,6 +139,8 @@ def add_target_args(ap):
     ap.add_argument("--contains-hex", help="target packets whose bytes contain this hex string")
     ap.add_argument("--flow-of", type=int, help="target the whole conversation of packet N")
     ap.add_argument("--ignore", help="BPF for packets that may match or not (don't care)")
+    ap.add_argument("--allow-dns", action="store_true",
+                    help="resolve host names in filters (off by default: air-gapped hosts have no DNS)")
 
 
 # --------------------------------------------------------------------------
@@ -271,10 +274,10 @@ def packet_features(d):
             add("tcp[tcpflags] & tcp-ack = 0", "tcpflags", 3.0, "ACK not set")
         add("tcp[tcpflags] = 0x%02x" % f, "tcpflags", 3.4, "exact TCP flags [%s]" % dec.flags_str(f))
         add("tcp[14:2] = %d" % d["win"], "fingerprint", 4.5, "TCP window size")
-    if l3 == "ipv4" and first_frag and l4 == "icmp":
+    if l3 == "ipv4" and first_frag and l4 == "icmp" and "icmp_type" in d:
         t = d["icmp_type"]
         add("icmp[icmptype] = %s" % ICMP_NAMES.get(t, t), "icmp", 2.3, "ICMP type %d" % t)
-    if l3 == "ipv6" and d.get("ip6_nh") == 58:
+    if l3 == "ipv6" and d.get("ip6_nh") == 58 and "icmp_type" in d:
         t = d["icmp_type"]
         add("ip6[6] = 58 and ip6[40] = %d" % t, "icmp", 2.5, "ICMPv6 type %d" % t)
     if l3 == "ipv4" and first_frag and l4 == "udp" and "dns_qr" in d and 53 in (d["sport"], d["dport"]):
@@ -856,7 +859,7 @@ def cmd_profile(cap, args):
             sp, dp = d["sport"], d["dport"]
             svc = dp if _is_service_port(dp, sp) else sp
             sports[(pre, d["l4"], svc)] += 1
-            if d["l4"] == "tcp" and d["flags"] & 0x12 == 0x02:
+            if d["l4"] == "tcp" and "flags" in d and d["flags"] & 0x12 == 0x02:
                 syns[(pre, d["src"], d["dst"])].add(dp)
             pl = d.get("payload") or b""
             if len(pl) >= 4:
@@ -982,6 +985,7 @@ def _main(argv=None):
     if not args.cmd:
         ap.print_help()
         return 2
+    bpf_module.ALLOW_DNS = getattr(args, "allow_dns", False)
     try:
         cap = Capture(args.file, args.max_packets)
     except CaptureFormatError as e:

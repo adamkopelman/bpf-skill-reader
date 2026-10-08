@@ -19,6 +19,7 @@ import json
 import sys
 
 from . import decode as dec
+from . import bpf as bpf_module
 from .bpf import compile_filter, FilterSyntaxError, FilterUnsupported
 from .pcapio import read_packets, detect_format, linktype_name, PcapWriter, CaptureFormatError
 from .util import (parse_index_spec, find_tcpdump, tcpdump_compile,
@@ -46,6 +47,8 @@ def build_argparser():
     ap.add_argument("-w", dest="write", help="write matching packets to this pcap file")
     ap.add_argument("--check", action="store_true",
                     help="only validate the filter (and show tcpdump -d bytecode if tcpdump exists)")
+    ap.add_argument("--allow-dns", action="store_true",
+                    help="resolve host names in the filter (off by default: air-gapped hosts have no DNS)")
     ap.add_argument("--compare", action="store_true",
                     help="also run the filter through tcpdump (if installed) and compare results")
     return ap
@@ -71,6 +74,7 @@ def main(argv=None):
 def _main(argv=None):
     args = build_argparser().parse_args(argv)
     expr = load_filter_text(args)
+    bpf_module.ALLOW_DNS = args.allow_dns
     try:
         flt = compile_filter(expr)
     except (FilterSyntaxError, FilterUnsupported) as e:

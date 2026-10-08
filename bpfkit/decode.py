@@ -36,16 +36,22 @@ HTTP_METHODS = (b"GET ", b"POST ", b"PUT ", b"HEAD ", b"DELETE ", b"OPTIONS ",
 IPV6_EXT = (0, 43, 44, 60)
 
 
+def _need(b, n):
+    if len(b) != n:
+        raise IndexError("truncated field")  # caught by decode(): marks the packet truncated
+    return b
+
+
 def mac_str(b):
-    return ":".join("%02x" % x for x in bytearray(b))
+    return ":".join("%02x" % x for x in bytearray(_need(b, 6)))
 
 
 def ip4_str(b):
-    return "%d.%d.%d.%d" % tuple(bytearray(b))
+    return "%d.%d.%d.%d" % tuple(bytearray(_need(b, 4)))
 
 
 def ip6_str(b):
-    return str(ipaddress.IPv6Address(bytes(b)))
+    return str(ipaddress.IPv6Address(bytes(_need(b, 16))))
 
 
 def decode(pkt):
@@ -62,7 +68,7 @@ def decode(pkt):
 
 def _decode_link(d, data, lt):
     if lt == 1:
-        d["eth_dst"], d["eth_src"] = mac_str(data[0:6]), mac_str(data[6:12])
+        d["eth_dst"], d["eth_src"] = mac_str(data[0:6]), mac_str(data[6:12])  # both or neither
         et = struct.unpack(">H", data[12:14])[0]
         off = 14
         while et in (0x8100, 0x88A8, 0x9100):
@@ -100,35 +106,28 @@ def _decode_link(d, data, lt):
         _decode_arp(d, data, off)
 
 
+# Each decoder reads all fixed fields into locals first and sets "l3" only
+# together with them, so "l3 present" always implies its core fields exist
+# (truncated packets just stop at the last complete layer).
+
 def _decode_ip4(d, data, off):
-    d["l3"] = "ipv4"
     vihl = data[off]
-    ihl = (vihl & 0x0F) * 4
     tot, ident, frag = struct.unpack(">HHH", data[off + 2:off + 8])
-    d["ihl"] = ihl
-    d["ip_id"] = ident
-    d["ttl"] = data[off + 8]
-    d["proto"] = data[off + 9]
-    d["src"] = ip4_str(data[off + 12:off + 16])
-    d["dst"] = ip4_str(data[off + 16:off + 20])
-    d["frag_off"] = frag & 0x1FFF
-    d["mf"] = bool(frag & 0x2000)
-    d["df"] = bool(frag & 0x4000)
+    ttl, proto = data[off + 8], data[off + 9]
+    src, dst = ip4_str(data[off + 12:off + 16]), ip4_str(data[off + 16:off + 20])
+    d.update(l3="ipv4", ihl=(vihl & 0x0F) * 4, ip_id=ident, ttl=ttl, proto=proto, src=src, dst=dst,
+             frag_off=frag & 0x1FFF, mf=bool(frag & 0x2000), df=bool(frag & 0x4000))
     if d["frag_off"]:
         return  # non-first fragment: no transport header
-    _decode_l4(d, data, off + ihl, d["proto"], ip_end=off + tot)
+    _decode_l4(d, data, off + d["ihl"], proto, ip_end=off + tot)
 
 
 def _decode_ip6(d, data, off):
-    d["l3"] = "ipv6"
     plen = struct.unpack(">H", data[off + 4:off + 6])[0]
-    nh = data[off + 6]
-    d["hlim"] = data[off + 7]
-    d["ttl"] = d["hlim"]
-    d["src"] = ip6_str(data[off + 8:off + 24])
-    d["dst"] = ip6_str(data[off + 24:off + 40])
-    d["ip6_nh"] = nh
-    d["ip6_direct"] = nh not in IPV6_EXT  # what libpcap's port/tcp[] logic sees
+    nh, hlim = data[off + 6], data[off + 7]
+    src, dst = ip6_str(data[off + 8:off + 24]), ip6_str(data[off + 24:off + 40])
+    d.update(l3="ipv6", hlim=hlim, ttl=hlim, src=src, dst=dst, ip6_nh=nh, proto=nh,
+             ip6_direct=nh not in IPV6_EXT)  # ip6_direct: what libpcap's port/tcp[] logic sees
     p = off + 40
     hops = 0
     while nh in IPV6_EXT and hops < 8:
@@ -153,43 +152,38 @@ def _decode_ip6(d, data, off):
 
 
 def _decode_arp(d, data, off):
-    d["l3"] = "arp"
-    op = struct.unpack(">H", data[off + 6:off + 8])[0]
-    d["arp_op"] = op
     hlen, plen = data[off + 4], data[off + 5]
+    op = struct.unpack(">H", data[off + 6:off + 8])[0]
+    d.update(l3="arp", arp_op=op)
     if hlen == 6 and plen == 4:
-        d["arp_sha"] = mac_str(data[off + 8:off + 14])
-        d["src"] = ip4_str(data[off + 14:off + 18])
-        d["arp_tha"] = mac_str(data[off + 18:off + 24])
-        d["dst"] = ip4_str(data[off + 24:off + 28])
+        sha, spa = mac_str(data[off + 8:off + 14]), ip4_str(data[off + 14:off + 18])
+        tha, tpa = mac_str(data[off + 18:off + 24]), ip4_str(data[off + 24:off + 28])
+        d.update(arp_sha=sha, src=spa, arp_tha=tha, dst=tpa)
 
 
 def _decode_l4(d, data, off, proto, ip_end):
     end = min(len(data), ip_end) if ip_end > off else len(data)
     d["l4_off"] = off
+    # Ports are decoded on their own first, because the filter engine only
+    # needs those 4 bytes for 'port N'. "l4" is set only once its fields exist.
+    if proto in (6, 17, 132):
+        sp, dp = struct.unpack(">HH", data[off:off + 4])
+        d.update(l4={6: "tcp", 17: "udp", 132: "sctp"}[proto], sport=sp, dport=dp)
     if proto == 6:
-        d["l4"] = "tcp"
-        sp, dp, seq, ack, offflags, win = struct.unpack(">HHIIHH", data[off:off + 16])
+        seq, ack, offflags, win = struct.unpack(">IIHH", data[off + 4:off + 16])
         doff = (offflags >> 12) * 4
-        d.update(sport=sp, dport=dp, seq=seq, ack=ack, flags=offflags & 0xFF, win=win, tcp_hlen=doff)
+        d.update(seq=seq, ack=ack, flags=offflags & 0xFF, win=win, tcp_hlen=doff)
         d["payload_off"] = off + doff
         d["payload"] = bytes(data[off + doff:end])
     elif proto == 17:
-        d["l4"] = "udp"
-        sp, dp, ulen = struct.unpack(">HHH", data[off:off + 6])
-        d.update(sport=sp, dport=dp)
         d["payload_off"] = off + 8
         d["payload"] = bytes(data[off + 8:end])
-    elif proto == 132:
-        d["l4"] = "sctp"
-        sp, dp = struct.unpack(">HH", data[off:off + 4])
-        d.update(sport=sp, dport=dp)
     elif proto in (1, 58):
-        d["l4"] = "icmp" if proto == 1 else "icmp6"
-        d["icmp_type"], d["icmp_code"] = data[off], data[off + 1]
+        t, c = data[off], data[off + 1]
+        d.update(l4="icmp" if proto == 1 else "icmp6", icmp_type=t, icmp_code=c)
         d["payload_off"] = off + 8
         d["payload"] = bytes(data[off + 8:end])
-    else:
+    elif proto != 132:
         d["l4"] = IP_PROTO_LABEL.get(proto, "proto-%d" % proto).lower()
         d["payload_off"] = off
         d["payload"] = bytes(data[off:end])
@@ -296,6 +290,14 @@ def endpoint(d, which):
 
 def summary(d):
     """tcpdump-like one-line description of a decoded packet."""
+    try:
+        return _summary(d)
+    except (KeyError, TypeError):  # partially decoded (truncated/malformed) packet
+        known = " ".join("%s=%s" % (k, d[k]) for k in ("l3", "src", "dst", "l4", "sport", "dport") if d.get(k) is not None)
+        return "truncated/malformed packet (%s), length %d" % (known or "nothing decoded", d["len"])
+
+
+def _summary(d):
     vl = "".join("vlan %d, " % v for v in d["vlans"])
     l3 = d.get("l3")
     if d.get("unsupported_link"):
