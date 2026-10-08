@@ -6,6 +6,8 @@ Checks
   1. capture I/O: pcap (us + ns), pcapng, gzip, raw IP / SLL / SLL2 / NULL / LOOP
   2. the filter engine against results recorded from real tcpdump/libpcap
      (bpfkit/expected.py) on Ethernet and Linux-cooked captures
+  2b. the engine against tcpdump's answers on real captures (tests/corpus/)
+  2c. the unit tests in tests/ (when present)
   3. syntax errors are reported, not silently accepted
   4. bpfgen finds exact filters for known target groups
   5. if tcpdump IS installed: a live cross-check of every expected filter
@@ -81,6 +83,25 @@ def main(argv=None):
         print("    Linux SLL: %d/%d filters agree" % (ok, len(EXPECTED[113])))
         ok = run_filters(ng, EXPECTED[1])
         print("    pcapng: %d/%d filters agree" % (ok, len(EXPECTED[1])))
+
+        from . import corpus
+        if os.path.exists(corpus.EXPECTED):
+            checked, problems = corpus.check_corpus(verbose=False)
+            for prob in problems:
+                check(False, "corpus: " + prob)
+            print("[2b] real captures (tests/corpus): %d checks, %d problems" % (checked, len(problems)))
+        else:
+            print("[2b] tests/corpus not present - skipped")
+
+        tests_dir = os.path.join(corpus.ROOT, "tests")
+        if os.path.isdir(tests_dir):
+            import unittest
+            suite = unittest.defaultTestLoader.discover(tests_dir, top_level_dir=tests_dir)
+            with open(os.devnull, "w") as devnull:
+                res = unittest.TextTestRunner(stream=devnull, verbosity=0).run(suite)
+            for case, tb in res.failures + res.errors:
+                check(False, "unit test %s: %s" % (case, tb.strip().splitlines()[-1]))
+            print("[2c] unit tests: %d run, %d failed" % (res.testsRun, len(res.failures) + len(res.errors)))
 
         print("[3] syntax errors are rejected")
         for bad in ("tcp port", "host 10.0.0.300", "ip[0:3] = 1", "(tcp", "port 99999",

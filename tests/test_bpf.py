@@ -217,8 +217,13 @@ class EvaluationTests(unittest.TestCase):
         frame = tcp_frame()
         self.assertTrue(compile_filter("len = 1500").match(pkt(frame, wirelen=1500)))
 
-    def test_division_by_zero_rejects(self):
-        self.assertFalse(self.m("ip[0] / (ip[0] - ip[0]) = 1 or ip", tcp_frame()))
+    def test_division_by_zero(self):
+        # a divisor libpcap can fold to 0 is a compile error, like tcpdump's
+        for f in ("ip[0] / 0 = 1", "ip[0] / (ip[1] & 0) = 1", "ip[0] % (ip[0] - ip[0]) = 1"):
+            with self.assertRaises(FilterSyntaxError):
+                compile_filter(f)
+        # a divisor that is 0 only at run time rejects the whole packet (BPF returns 0)
+        self.assertFalse(self.m("ip[0] / (ip[1] & 1) = 1 or ip", tcp_frame()))
 
     def test_link_types(self):
         frame = tcp_frame()

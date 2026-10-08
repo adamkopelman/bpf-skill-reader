@@ -43,6 +43,10 @@ class FilterUnsupported(Exception):
     pass
 
 
+class _FatalSyntaxError(FilterSyntaxError):
+    """A definite error inside a relation; the parser must not backtrack past it."""
+
+
 class _Reject(Exception):
     """Out-of-bounds load / divide by zero: the whole program returns 0."""
 
@@ -480,6 +484,28 @@ class BinOp(object):
         return r & 0xFFFFFFFF
 
 
+def _static_value(node):
+    """The value of an arithmetic node if it is known without a packet, else None.
+    Mirrors the constant folding libpcap does before it checks for / 0."""
+    if isinstance(node, Const):
+        return node.v
+    if isinstance(node, BinOp):
+        a, b = _static_value(node.a), _static_value(node.b)
+        if node.op in ("&", "*") and 0 in (a, b):
+            return 0
+        if node.op in ("-", "^") and str(node.a) == str(node.b):
+            return 0  # libpcap's value numbering sees x - x and x ^ x as 0
+        if a is not None and b is not None:
+            try:
+                return BinOp(node.op, Const(a), Const(b)).val(None)
+            except _Reject:
+                return None
+    if isinstance(node, Neg):
+        v = _static_value(node.a)
+        return None if v is None else (-v) & 0xFFFFFFFF
+    return None
+
+
 class Neg(object):
     def __init__(self, a):
         self.a = a
@@ -803,6 +829,8 @@ class Parser(object):
         save, depth, last = self.i, self.vlan_depth, self.last
         try:
             return self.relation()
+        except _FatalSyntaxError:
+            raise
         except FilterSyntaxError:
             self.i, self.vlan_depth, self.last = save, depth, last
         if self.is_op("("):
@@ -831,7 +859,11 @@ class Parser(object):
         node = self.arith(level + 1)
         while self.t.kind == "op" and self.t.val in self._PREC[level]:
             op = self.adv().val
-            node = BinOp(op, node, self.arith(level + 1))
+            rhs = self.arith(level + 1)
+            if op in ("/", "%") and _static_value(rhs) == 0:
+                # libpcap's optimiser folds the divisor and refuses the filter
+                raise _FatalSyntaxError("%s by zero" % ("division" if op == "/" else "modulus"))
+            node = BinOp(op, node, rhs)
         return node
 
     def arith_unary(self):
@@ -1000,8 +1032,8 @@ class Parser(object):
             self.err("expected protocol number or name")
         desc = "%s proto %d" % (proto or "", v)
         if proto in ("ether", "link"):
-            if v == 0x8100:
-                return self._vlan(d, None)
+            # a plain EtherType compare, even for 0x8100: unlike 'vlan' it accepts
+            # no other TPIDs and does not shift later offsets (as libpcap compiles it)
             return Fn(desc, lambda c: c.ethertype(d) == v)
         if proto == "ip":
             return Fn(desc, lambda c: _ip_proto(c, d, v))

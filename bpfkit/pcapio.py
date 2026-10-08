@@ -31,6 +31,9 @@ LINKTYPE_NAMES = {
     276: "LINUX_SLL2 (Linux cooked v2)",
 }
 
+# Values some writers use for raw IP; libpcap reads them as LINKTYPE_RAW.
+LINKTYPE_ALIASES = {12: 101, 14: 101}
+
 # Link types the filter engine and decoder understand.
 SUPPORTED_LINKTYPES = (0, 1, 101, 108, 113, 228, 229, 276)
 
@@ -164,7 +167,8 @@ def _read_pcap(f):
         raise CaptureFormatError("truncated pcap global header")
     endian, div, extended = PCAP_MAGICS[gh[:4]]
     _vmaj, _vmin, _zone, _sig, _snap, network = struct.unpack(endian + "HHiIII", gh[4:])
-    linktype = network & 0x0FFFFFFF  # upper bits may carry FCS-length info
+    linktype = network & 0xFFFF  # bits 16+ carry FCS-length/flag info, not the link type
+    linktype = LINKTYPE_ALIASES.get(linktype, linktype)
     rh_len = 24 if extended else 16
     idx = 0
     while True:
@@ -216,6 +220,7 @@ def _read_pcapng(f):
         body = body[:-4]  # trailing block length
         if btype == 1:  # Interface Description Block
             linktype, _res, snaplen = struct.unpack(endian + "HHI", body[:8])
+            linktype = LINKTYPE_ALIASES.get(linktype, linktype)
             div, shift = 10 ** 6, None
             for code, val in _pcapng_options(body[8:], endian):
                 if code == 9 and val:  # if_tsresol
