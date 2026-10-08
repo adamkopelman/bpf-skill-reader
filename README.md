@@ -77,6 +77,13 @@ Supported link types are Ethernet, raw IP, Linux SLL/SLL2 and BSD
 NULL/LOOP. Unsupported constructs, such as Wi-Fi, `mpls` or `protochain`,
 produce a clear error that suggests tcpdump.
 
+## Plan and known weaknesses
+
+See [ROADMAP.md](ROADMAP.md) for the prioritised plan and the honest list
+of what needs to get better: real-capture test corpus, older Python and
+libpcap verification, bytecode output, learner and VLAN limitations, and
+skill evals.
+
 ## Development
 
 ```sh
